@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}알림{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title">모니터링 키워드 설정
+    <button class="btn sm" onclick="addAlert()"><i class="fa-solid fa-plus"></i> 추가</button>
+  </div>
+  <div id="alert-list"></div>
+</div>
+
+<div class="card">
+  <div class="card-title">최근 알림 내역</div>
+  <div id="recent-alerts">
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:7px;background:var(--bg3);margin-bottom:6px">
+      <i class="fa-solid fa-bell-ring" style="color:var(--blue)"></i>
+      <div><div style="font-weight:500;font-size:12px">수집 완료 시 알림이 여기 표시됩니다</div>
+      <div style="font-size:10px;color:var(--text3)">키워드를 등록하면 관련 뉴스 수집 시 알림을 받을 수 있습니다</div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let alerts = JSON.parse(localStorage.getItem('ampis_alerts')||'[]');
+if(!alerts.length) alerts = [
+  {keyword:'PF', type:'키워드'},
+  {keyword:'NPL', type:'키워드'},
+  {keyword:'인프라 펀드', type:'키워드'},
+];
+
+function renderAlerts(){
+  const el = document.getElementById('alert-list');
+  if(!alerts.length){ el.innerHTML='<div class="empty">등록된 알림이 없습니다.</div>'; return; }
+  el.innerHTML = alerts.map((a,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:7px;background:var(--bg3);margin-bottom:6px">
+      <i class="fa-solid fa-bell-check" style="color:var(--blue)"></i>
+      <div style="flex:1">
+        <div style="font-weight:500;font-size:12px">${a.keyword}</div>
+        <div style="font-size:10px;color:var(--text3)">${a.type} 모니터링 중</div>
+      </div>
+      <button class="btn sm danger" onclick="removeAlert(${i})"><i class="fa-solid fa-trash"></i></button>
+    </div>`).join('');
+  localStorage.setItem('ampis_alerts', JSON.stringify(alerts));
+}
+
+function addAlert(){
+  const kw = prompt('모니터링할 키워드를 입력하세요\n(예: KB증권, 판교 물류센터, NPL)');
+  if(kw && kw.trim()){
+    alerts.push({keyword: kw.trim(), type:'키워드'});
+    renderAlerts();
+    showToast(kw.trim()+' 알림이 등록되었습니다.');
+  }
+}
+function removeAlert(i){ alerts.splice(i,1); renderAlerts(); }
+renderAlerts();
+</script>
+{% endblock %}

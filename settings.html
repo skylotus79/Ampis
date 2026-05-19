@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}설정{% endblock %}
+{% block content %}
+<form id="settingsForm">
+<div class="card">
+  <div class="card-title">뉴스 수집 기간 설정</div>
+  <div style="display:grid;gap:0">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)">
+      <div><div style="font-weight:500">수집 시작일</div><div style="font-size:11px;color:var(--text3);margin-top:2px">이 날짜 이후 보도된 뉴스를 수집합니다</div></div>
+      <input type="date" name="crawl_from" value="{{ settings.crawl_from }}">
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)">
+      <div><div style="font-weight:500">수집 종료일</div><div style="font-size:11px;color:var(--text3);margin-top:2px">비워두면 오늘까지 수집합니다</div></div>
+      <input type="date" name="crawl_to" value="{{ settings.crawl_to }}">
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)">
+      <div><div style="font-weight:500">자동 수집 주기</div><div style="font-size:11px;color:var(--text3);margin-top:2px">정해진 간격으로 자동 크롤링 실행</div></div>
+      <select name="crawl_interval">
+        {% for h in [1,2,3,6,12,24] %}
+        <option value="{{ h }}" {% if settings.crawl_interval==h %}selected{% endif %}>{{ h }}시간마다</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0">
+      <div><div style="font-weight:500">최대 수집 기간</div><div style="font-size:11px;color:var(--text3);margin-top:2px">한 번에 수집할 최대 날짜 범위 (일)</div></div>
+      <input type="number" name="max_days" value="{{ settings.max_days }}" min="1" max="365" style="width:80px">
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">수집 소스 관리</div>
+  {% for src, enabled in settings.sources.items() %}
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+    <div style="font-weight:500">{{ src }}</div>
+    <label class="toggle">
+      <input type="checkbox" name="source_{{ src }}" {% if enabled %}checked{% endif %}>
+      <span class="slider"></span>
+    </label>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="card-title">AI 분석 설정</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+    <div><div style="font-weight:500">뉴스 자동 구조화</div><div style="font-size:11px;color:var(--text3)">수집 즉시 Claude AI로 프로젝트 정보 추출</div></div>
+    <label class="toggle"><input type="checkbox" name="auto_parse" {% if settings.auto_parse %}checked{% endif %}><span class="slider"></span></label>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0">
+    <div><div style="font-weight:500">중복 뉴스 감지</div><div style="font-size:11px;color:var(--text3)">유사도 75% 이상 기사를 자동으로 하나로 통합</div></div>
+    <label class="toggle"><input type="checkbox" name="dedup" {% if settings.dedup %}checked{% endif %}><span class="slider"></span></label>
+  </div>
+</div>
+
+<button type="submit" class="btn primary"><i class="fa-solid fa-floppy-disk"></i> 설정 저장</button>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('settingsForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const sources = {};
+  ['한국경제','매일경제','이데일리','머니투데이','연합인포맥스'].forEach(s=>{
+    sources[s] = fd.has(`source_${s}`);
+  });
+  const body = {
+    crawl_from:      fd.get('crawl_from'),
+    crawl_to:        fd.get('crawl_to'),
+    crawl_interval:  parseInt(fd.get('crawl_interval')),
+    max_days:        parseInt(fd.get('max_days')),
+    auto_parse:      fd.has('auto_parse'),
+    dedup:           fd.has('dedup'),
+    sources,
+  };
+  const r = await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json();
+  showToast(d.ok ? '설정이 저장되었습니다.' : '저장 실패');
+});
+</script>
+{% endblock %}

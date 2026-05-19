@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}뉴스 수집{% endblock %}
+{% block content %}
+<div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+  <div style="font-size:12px;color:var(--text2)">소스별 필터:</div>
+  <select id="srcSel" onchange="loadNews()">
+    <option value="">전체 소스</option>
+    <option>한국경제</option><option>매일경제</option>
+    <option>이데일리</option><option>머니투데이</option><option>연합인포맥스</option>
+  </select>
+  <select id="parsedSel" onchange="loadNews()">
+    <option value="">전체</option>
+    <option value="0">분석 대기</option>
+    <option value="1">분석 완료</option>
+  </select>
+  <div style="font-size:12px;color:var(--text2);margin-left:4px">기간:</div>
+  <input type="date" id="fromDate" onchange="loadNews()">
+  <span style="font-size:12px;color:var(--text3)">~</span>
+  <input type="date" id="toDate" onchange="loadNews()">
+  <button class="btn primary sm" onclick="parseAll(this)" style="margin-left:auto"><i class="fa-solid fa-wand-magic-sparkles"></i> AI 일괄 분석</button>
+</div>
+
+<div class="table-wrap">
+  <table class="tbl">
+    <thead><tr><th>유형</th><th>제목</th><th>출처</th><th>날짜</th><th>상태</th><th></th></tr></thead>
+    <tbody id="news-tbody"><tr><td colspan="6" class="empty">로딩 중...</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+// 기간 기본값: 최근 30일
+const today = new Date().toISOString().slice(0,10);
+const month = new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+document.getElementById('fromDate').value = month;
+document.getElementById('toDate').value   = today;
+
+async function loadNews(){
+  const src    = document.getElementById('srcSel').value;
+  const parsed = document.getElementById('parsedSel').value;
+  const from   = document.getElementById('fromDate').value;
+  const to     = document.getElementById('toDate').value;
+  let url = `/api/news?limit=200`;
+  if(src)    url+=`&source=${encodeURIComponent(src)}`;
+  if(parsed) url+=`&parsed=${parsed}`;
+  if(from)   url+=`&from=${from}`;
+  if(to)     url+=`&to=${to}`;
+
+  const rows = await fetch(url).then(r=>r.json());
+  const tbody = document.getElementById('news-tbody');
+  if(!rows.length){ tbody.innerHTML='<tr><td colspan="6" class="empty">해당 뉴스가 없습니다.</td></tr>'; return; }
+  tbody.innerHTML = rows.map(n=>`
+    <tr>
+      <td>${typeBadge(guessType(n.title))}</td>
+      <td style="max-width:300px"><a href="${n.url}" target="_blank" class="news-link">${n.title}</a>
+        ${n.summary?`<div style="font-size:10px;color:var(--text3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px">${n.summary}</div>`:''}</td>
+      <td style="white-space:nowrap">${n.source}</td>
+      <td style="white-space:nowrap;color:var(--text3);font-size:11px">${(n.published||'').slice(0,10)}</td>
+      <td>${n.is_parsed
+        ? '<span style="color:var(--green);font-size:11px">✓ 분석완료</span>'
+        : '<span style="color:var(--amber);font-size:11px">대기</span>'}</td>
+      <td><button class="btn sm" onclick="analyzeOne(${n.id})"><i class="fa-solid fa-wand-magic-sparkles"></i></button></td>
+    </tr>`).join('');
+}
+
+function guessType(title){
+  if(/부동산|오피스|물류|데이터센터|주거|호텔|리테일/.test(title)) return '부동산';
+  if(/인프라|GTX|고속도로|항만/.test(title)) return '인프라';
+  if(/에너지|풍력|태양광|발전/.test(title)) return '에너지';
+  if(/M&A|인수|합병|LBO/.test(title)) return 'M&A';
+  if(/PE|PEF|사모펀드|바이아웃/.test(title)) return 'PEF';
+  if(/NPL|부실채권/.test(title)) return 'NPL';
+  if(/IB|기업금융|딜|약정/.test(title)) return '기업금융';
+  return '기타';
+}
+
+async function analyzeOne(newsId){
+  showToast('AI 분석 요청 중...');
+  const r = await fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch_size:1})});
+  const d = await r.json();
+  showToast(d.ok ? `분석 완료: ${d.projects_saved}건 저장` : '분석 실패: '+d.error);
+  loadNews();
+}
+async function parseAll(btn){
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> 분석 중...';
+  const r = await fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch_size:50})});
+  const d = await r.json();
+  showToast(d.ok ? `일괄 분석 완료: ${d.projects_saved}건 저장` : '오류: '+d.error);
+  btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> AI 일괄 분석';
+  loadNews();
+}
+loadNews();
+</script>
+{% endblock %}

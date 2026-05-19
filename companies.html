@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}회사 분석{% endblock %}
+{% block content %}
+<div class="filter-bar" id="coFbar">
+  <button class="fbtn on" onclick="setCoCat('',this)">전체</button>
+  <button class="fbtn" onclick="setCoCat('은행',this)">은행</button>
+  <button class="fbtn" onclick="setCoCat('증권사',this)">증권사</button>
+  <button class="fbtn" onclick="setCoCat('자산운용사',this)">자산운용사</button>
+  <button class="fbtn" onclick="setCoCat('보험/여전사',this)">보험/여전사</button>
+  <button class="fbtn" onclick="setCoCat('PE',this)">PE</button>
+  <button class="fbtn" onclick="setCoCat('연기금/공제회',this)">연기금/공제회</button>
+  <button class="fbtn" onclick="setCoCat('시공사',this)">시공사</button>
+</div>
+
+<div class="two-col">
+  <!-- 왼쪽: 회사 목록 -->
+  <div id="co-list" style="max-height:600px;overflow-y:auto">
+    <div class="empty">로딩 중...</div>
+  </div>
+  <!-- 오른쪽: 상세 -->
+  <div class="card" id="co-detail" style="min-height:300px">
+    <div class="empty">회사를 선택하면<br>상세 분석이 표시됩니다</div>
+  </div>
+</div>
+
+<!-- 투자 추이 차트 -->
+<div class="card" id="co-chart-card" style="display:none;margin-top:12px">
+  <div class="card-title" id="co-chart-title">투자 추이</div>
+  <div style="position:relative;height:200px"><canvas id="coChart"></canvas></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 회사 종류 분류 규칙 (회사명 키워드 기반 — DB에 별도 컬럼이 없으므로 클라이언트에서 분류)
+const CO_CAT_RULES = [
+  {cat:'은행',       keywords:['은행','뱅크','bank']},
+  {cat:'증권사',     keywords:['증권','투자증권','금융투자']},
+  {cat:'자산운용사', keywords:['자산운용','운용','투자운용']},
+  {cat:'보험/여전사',keywords:['보험','생명','화재','캐피탈','카드','여전']},
+  {cat:'PE',         keywords:['PE','프라이빗에쿼티','파트너스','인베스트','어피너티','KKR','MBK','IMM','VIG','스틱']},
+  {cat:'연기금/공제회',keywords:['연금','연기금','공제','기금','국민연금','공무원','교직원','군인','사학']},
+  {cat:'시공사',     keywords:['건설','건축','엔지니어링','이앤씨','E&C','포스코','GS건설','현대건설','대우건설','롯데건설','삼성물산','DL이앤씨']},
+];
+
+function getCategory(name){
+  const n = name.toLowerCase();
+  for(const rule of CO_CAT_RULES){
+    if(rule.keywords.some(k=>n.includes(k.toLowerCase()))) return rule.cat;
+  }
+  return '기타';
+}
+
+let allCompanies = [];
+let curCat = '';
+let coChartInst = null;
+
+async function loadCompanies(){
+  allCompanies = await fetch('/api/companies').then(r=>r.json());
+  renderCompanyList();
+}
+
+function setCoCat(cat, btn){
+  curCat = cat;
+  document.querySelectorAll('#coFbar .fbtn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  renderCompanyList();
+}
+
+function renderCompanyList(){
+  const filtered = curCat
+    ? allCompanies.filter(c => getCategory(c.name) === curCat)
+    : allCompanies;
+
+  // 카테고리별 그룹핑
+  const groups = {};
+  filtered.forEach(c=>{
+    const cat = getCategory(c.name);
+    if(!groups[cat]) groups[cat]=[];
+    groups[cat].push(c);
+  });
+
+  const el = document.getElementById('co-list');
+  if(!filtered.length){ el.innerHTML='<div class="empty">해당 회사가 없습니다.</div>'; return; }
+
+  const catOrder = ['은행','증권사','자산운용사','보험/여전사','PE','연기금/공제회','시공사','기타'];
+  el.innerHTML = catOrder.filter(c=>groups[c]).map(cat=>`
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;padding-bottom:5px;border-bottom:1px solid var(--border);margin-bottom:7px">${cat}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${groups[cat].map(c=>`
+          <div class="co-card" id="co-${c.name}" onclick="selectCompany('${c.name}',this)"
+            style="background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:10px;cursor:pointer">
+            <div style="font-size:12px;font-weight:500;margin-bottom:2px">${c.name}</div>
+            <div style="font-size:10px;color:var(--text2)">${c.project_count}건 · ${c.top_type||'—'}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:1px">${c.roles.join('/')}</div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+async function selectCompany(name, el){
+  document.querySelectorAll('.co-card').forEach(c=>{
+    c.style.borderColor='var(--border)'; c.style.background='var(--bg2)';
+  });
+  el.style.borderColor='var(--blue)'; el.style.background='var(--blue-bg)';
+
+  const d = await fetch(`/api/companies/${encodeURIComponent(name)}`).then(r=>r.json());
+  const det = document.getElementById('co-detail');
+
+  const projRows = d.projects.map(p=>`
+    <div onclick="location.href='/projects?highlight=${p.id}'"
+      style="padding:8px 10px;border-radius:6px;background:var(--bg3);margin-bottom:5px;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+        <span style="font-size:12px;font-weight:500;flex:1">${p.name||'—'}</span>
+        ${typeBadge(p.type)}
+      </div>
+      <div style="font-size:11px;color:var(--text2);display:flex;gap:8px">
+        <span>${p.size||'—'}</span>
+        <span class="date-tag">${(p.published||'').slice(0,7)}</span>
+        <span>${statusDot(p.status)}</span>
+      </div>
+    </div>`).join('');
+
+  det.innerHTML = `
+    <div style="font-size:14px;font-weight:600;margin-bottom:10px">${name}
+      <span class="badge b-etc" style="margin-left:6px;font-size:10px">${getCategory(name)}</span>
+    </div>
+    <div class="drow"><span class="dlbl">참여 프로젝트</span><span class="dval">${d.count}건</span></div>
+    <div style="margin:10px 0 6px;font-size:11px;font-weight:500;color:var(--text2)">참여 프로젝트 목록</div>
+    ${projRows || '<div class="empty" style="padding:20px">참여 프로젝트 없음</div>'}
+    <div style="margin-top:10px">
+      <button class="btn primary sm" onclick="aiCoAnalyze('${name}')"><i class="fa-solid fa-robot"></i> AI 심층 분석 →</button>
+    </div>`;
+
+  // 연도별 차트 (참여 프로젝트 published 기준 집계)
+  const yearMap = {};
+  d.projects.forEach(p=>{
+    const y = (p.published||'').slice(0,4);
+    if(y) yearMap[y] = (yearMap[y]||0) + 1;
+  });
+  const years = Object.keys(yearMap).sort();
+  const vals  = years.map(y=>yearMap[y]);
+
+  const card = document.getElementById('co-chart-card');
+  document.getElementById('co-chart-title').textContent = name + ' 연도별 참여 프로젝트 수';
+  card.style.display = years.length ? 'block' : 'none';
+  if(coChartInst) coChartInst.destroy();
+  if(years.length){
+    coChartInst = new Chart(document.getElementById('coChart'),{
+      type:'bar',
+      data:{labels:years,datasets:[{data:vals,backgroundColor:'#378ADD',borderRadius:3,label:'건수'}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{x:{ticks:{font:{size:11}},grid:{display:false}},y:{ticks:{font:{size:11},stepSize:1},grid:{color:'rgba(0,0,0,.05)'}}}}
+    });
+  }
+}
+
+function aiCoAnalyze(name){ location.href='/ai?q='+encodeURIComponent(name+'의 투자 트렌드와 선호 프로젝트 유형을 분석해줘'); }
+
+loadCompanies();
+</script>
+{% endblock %}

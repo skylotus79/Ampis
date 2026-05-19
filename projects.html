@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}프로젝트{% endblock %}
+{% block content %}
+<div class="filter-bar" id="typeFbar">
+  <button class="fbtn on" onclick="setType('',this)">전체</button>
+  <button class="fbtn" onclick="setType('부동산',this)">부동산</button>
+  <button class="fbtn" onclick="setType('인프라',this)">인프라</button>
+  <button class="fbtn" onclick="setType('에너지',this)">에너지</button>
+  <button class="fbtn" onclick="setType('기업금융',this)">기업금융</button>
+  <button class="fbtn" onclick="setType('PEF',this)">PEF</button>
+  <button class="fbtn" onclick="setType('M&A',this)">M&A</button>
+  <button class="fbtn" onclick="setType('NPL',this)">NPL</button>
+  <select id="sortSel" onchange="loadProjects()" style="margin-left:auto">
+    <option value="date">최신순</option>
+    <option value="size">규모순</option>
+  </select>
+</div>
+
+<!-- 부동산 서브필터 -->
+<div class="filter-bar" id="reSubBar" style="display:none">
+  <span style="font-size:11px;color:var(--text2);align-self:center">물건유형:</span>
+  <button class="fbtn on" onclick="setReSub('',this)">전체</button>
+  <button class="fbtn" onclick="setReSub('오피스',this)">오피스</button>
+  <button class="fbtn" onclick="setReSub('주거',this)">주거</button>
+  <button class="fbtn" onclick="setReSub('물류',this)">물류</button>
+  <button class="fbtn" onclick="setReSub('리테일',this)">리테일</button>
+  <button class="fbtn" onclick="setReSub('데이터센터',this)">데이터센터</button>
+  <button class="fbtn" onclick="setReSub('호텔',this)">호텔</button>
+</div>
+
+<div class="table-wrap" style="margin-bottom:14px">
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th style="width:30%">프로젝트명</th>
+        <th>유형</th><th>규모</th><th>주요 FI</th><th>상태</th><th>연/월</th>
+      </tr>
+    </thead>
+    <tbody id="proj-tbody"><tr><td colspan="6" class="empty">로딩 중...</td></tr></tbody>
+  </table>
+</div>
+
+<!-- 상세 패널 -->
+<div id="detail-panel" style="display:none" class="card">
+  <div id="detail-content"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let curType='', curReSub='', curQ='';
+
+// URL 파라미터 처리 (검색·하이라이트)
+const urlP = new URLSearchParams(location.search);
+if(urlP.get('q'))        curQ = urlP.get('q');
+if(urlP.get('fi'))       curQ = urlP.get('fi');
+if(urlP.get('highlight')) highlightId = parseInt(urlP.get('highlight'));
+
+let highlightId = parseInt(urlP.get('highlight')||0);
+
+function setType(t, btn){
+  curType=t; curReSub='';
+  document.querySelectorAll('#typeFbar .fbtn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('reSubBar').style.display = t==='부동산' ? 'flex' : 'none';
+  if(t==='부동산') document.querySelectorAll('#reSubBar .fbtn').forEach((b,i)=>{b.classList.toggle('on',i===0);});
+  loadProjects();
+}
+function setReSub(v, btn){
+  curReSub=v;
+  document.querySelectorAll('#reSubBar .fbtn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  loadProjects();
+}
+
+async function loadProjects(){
+  const sort = document.getElementById('sortSel').value;
+  let url = `/api/projects?sort=${sort}&limit=200`;
+  if(curType)  url += `&type=${encodeURIComponent(curType)}`;
+  if(curReSub) url += `&re_sub=${encodeURIComponent(curReSub)}`;
+  if(curQ)     url += `&q=${encodeURIComponent(curQ)}`;
+
+  const rows = await fetch(url).then(r=>r.json());
+  const tbody = document.getElementById('proj-tbody');
+  if(!rows.length){
+    tbody.innerHTML='<tr><td colspan="6" class="empty">프로젝트가 없습니다.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(p=>`
+    <tr id="row-${p.id}" onclick="openDetail(${p.id})" style="${p.id===highlightId?'background:var(--blue-bg)':''}">
+      <td style="font-weight:500">${p.name||'—'}${p.re_sub?` <span style="font-size:10px;color:var(--text3)">[${p.re_sub}]</span>`:''}</td>
+      <td>${typeBadge(p.type)}</td>
+      <td>${p.size||'—'}</td>
+      <td style="color:var(--text2);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.fi||'—'}</td>
+      <td>${statusDot(p.status)}</td>
+      <td><span class="date-tag">${(p.published||'').slice(0,7)}</span></td>
+    </tr>`).join('');
+
+  if(highlightId) openDetail(highlightId);
+}
+
+async function openDetail(id){
+  const p = await fetch(`/api/projects/${id}`).then(r=>r.json());
+  const panel = document.getElementById('detail-panel');
+  const newsLink = p.news ? `<a href="${p.news.url}" class="news-link" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square"></i> ${p.news.source} · ${(p.news.published||'').slice(0,10)} · ${p.news.title}</a>` : '—';
+
+  document.getElementById('detail-content').innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:600">${p.name||'—'}</span>
+      ${typeBadge(p.type)}
+      ${p.re_sub?`<span class="badge b-etc">${p.re_sub}</span>`:''}
+      <span style="display:flex;align-items:center;font-size:11px">${statusDot(p.status)}</span>
+      <span class="date-tag">${(p.published||'').slice(0,7)}</span>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn sm" onclick="setAlert('${p.name}')"><i class="fa-solid fa-bell"></i> 알림</button>
+        <button class="btn primary sm" onclick="aiAnalyze('${p.name}')"><i class="fa-solid fa-robot"></i> AI 분석 →</button>
+      </div>
+    </div>
+    <div class="two-col">
+      <div>
+        <div class="drow"><span class="dlbl">총 규모</span><span class="dval">${p.size||'—'}</span></div>
+        <div class="drow"><span class="dlbl">금융 구조</span><span class="dval">${p.structure||'—'}</span></div>
+        <div class="drow"><span class="dlbl">참여 금액</span><span class="dval">${p.amount||'—'}</span></div>
+        <div class="drow"><span class="dlbl">담보/신용</span><span class="dval">${p.collateral||'—'}</span></div>
+        <div class="drow"><span class="dlbl">Exit 전략</span><span class="dval">${p.exit_plan||'—'}</span></div>
+        <div class="drow"><span class="dlbl">특징</span><span class="dval">${p.features||'—'}</span></div>
+      </div>
+      <div>
+        <div class="drow"><span class="dlbl">FI (금융투자)</span><span class="dval">${p.fi||'—'}</span></div>
+        <div class="drow"><span class="dlbl">SI (전략적)</span><span class="dval">${p.si||'—'}</span></div>
+        <div class="drow"><span class="dlbl">시공사 (CI)</span><span class="dval">${p.ci||'—'}</span></div>
+        <div class="drow"><span class="dlbl">관련 뉴스</span><span class="dval">${newsLink}</span></div>
+        <div class="drow"><span class="dlbl">출처</span><span class="dval">${p.source_name||'—'}</span></div>
+      </div>
+    </div>`;
+  panel.style.display='block';
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function setAlert(name){ showToast(name+' 알림이 설정되었습니다.'); }
+function aiAnalyze(name){ location.href='/ai?q='+encodeURIComponent(name+' 프로젝트의 금융 구조와 리스크를 분석해줘'); }
+
+loadProjects();
+</script>
+{% endblock %}

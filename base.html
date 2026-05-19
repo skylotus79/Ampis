@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AMPIS — {% block title %}자산운용 분석 플랫폼{% endblock %}</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f8f8f7;--bg2:#fff;--bg3:#f0f0ef;
+  --border:#e5e5e3;--border2:#d0d0ce;
+  --text:#1a1a19;--text2:#555553;--text3:#999997;
+  --blue:#378ADD;--blue-bg:#EBF4FC;
+  --green:#639922;--green-bg:#EAF3DE;
+  --amber:#EF9F27;--amber-bg:#FEF3DC;
+  --red:#C0392B;--red-bg:#FAEAE8;
+  --sidebar-w:192px;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif;
+}
+body{display:flex;height:100vh;overflow:hidden;background:var(--bg);color:var(--text);font-size:13px}
+
+/* ── 사이드바 ── */
+.sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+.logo{padding:14px 16px;border-bottom:1px solid var(--border)}
+.logo-title{font-size:14px;font-weight:600;color:var(--text);letter-spacing:-.02em}
+.logo-sub{font-size:10px;color:var(--text3);margin-top:2px}
+.nav-section{font-size:10px;color:var(--text3);padding:12px 16px 4px;letter-spacing:.06em;text-transform:uppercase}
+.nav-item{display:flex;align-items:center;gap:8px;padding:7px 16px;color:var(--text2);cursor:pointer;border-left:2px solid transparent;text-decoration:none;font-size:12px}
+.nav-item:hover{background:var(--bg3);color:var(--text)}
+.nav-item.active{color:var(--blue);background:var(--blue-bg);border-left-color:var(--blue);font-weight:500}
+.nav-item i{width:16px;text-align:center;font-size:14px}
+.nav-badge{margin-left:auto;background:var(--amber);color:#fff;font-size:10px;padding:1px 6px;border-radius:10px}
+.sidebar-footer{margin-top:auto;padding:12px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--text3)}
+
+/* ── 메인 영역 ── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:9px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;z-index:10}
+.topbar input{flex:1;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text)}
+.topbar input:focus{outline:none;border-color:var(--blue);background:#fff}
+.content{flex:1;overflow-y:auto;padding:16px}
+
+/* ── 공통 컴포넌트 ── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;font-size:12px;border:1px solid var(--border2);border-radius:6px;cursor:pointer;background:var(--bg2);color:var(--text);white-space:nowrap;text-decoration:none}
+.btn:hover{background:var(--bg3)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.primary:hover{background:#1e6ab0}
+.btn.sm{padding:4px 9px;font-size:11px}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff}
+
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px}
+.card-title{font-size:13px;font-weight:500;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
+
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.metric{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
+.metric-lbl{font-size:11px;color:var(--text2);margin-bottom:4px}
+.metric-val{font-size:22px;font-weight:600;line-height:1}
+.metric-sub{font-size:10px;color:var(--green);margin-top:3px}
+
+.badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:500;white-space:nowrap}
+.b-re{background:#E6F1FB;color:#0C447C}
+.b-in{background:#EAF3DE;color:#27500A}
+.b-en{background:#E1F5EE;color:#085041}
+.b-cf{background:#FAEEDA;color:#633806}
+.b-pe{background:#EEEDFE;color:#3C3489}
+.b-ma{background:#FAECE7;color:#712B13}
+.b-np{background:#F1EFE8;color:#444441}
+.b-etc{background:var(--bg3);color:var(--text2)}
+
+.sdot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px;flex-shrink:0}
+.d-act{background:var(--green)}.d-rev{background:var(--amber)}.d-cls{background:#aaa}
+
+.table-wrap{border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{background:var(--bg3);padding:8px 12px;text-align:left;font-size:11px;font-weight:500;color:var(--text2);border-bottom:1px solid var(--border)}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--bg3);cursor:pointer}
+
+.filter-bar{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.fbtn{font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:20px;cursor:pointer;background:var(--bg2);color:var(--text2)}
+.fbtn.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.fbtn:hover:not(.on){background:var(--bg3)}
+
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.date-tag{font-size:10px;color:var(--text3);background:var(--bg3);padding:1px 6px;border-radius:4px}
+
+.drow{display:flex;gap:8px;margin-bottom:7px;font-size:12px}
+.dlbl{color:var(--text2);min-width:90px;flex-shrink:0;font-size:11px}
+.dval{color:var(--text);font-weight:500;word-break:break-all}
+
+a.news-link{color:var(--blue);text-decoration:none;font-size:11px;display:inline-flex;align-items:center;gap:3px}
+a.news-link:hover{text-decoration:underline}
+
+.empty{text-align:center;padding:40px;color:var(--text3);font-size:12px}
+
+select{font-size:11px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text)}
+input[type=date],input[type=number],input[type=text]{font-size:12px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text)}
+input:focus,select:focus{outline:none;border-color:var(--blue)}
+
+.toast{position:fixed;bottom:20px;right:20px;background:#333;color:#fff;padding:10px 16px;border-radius:8px;font-size:12px;z-index:9999;opacity:0;transition:opacity .3s}
+.toast.show{opacity:1}
+
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #ccc;border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* 토글 스위치 */
+.toggle{position:relative;display:inline-block;width:36px;height:20px}
+.toggle input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;inset:0;background:var(--border2);border-radius:20px;transition:.2s}
+.slider:before{position:absolute;content:'';height:14px;width:14px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
+input:checked+.slider{background:var(--blue)}
+input:checked+.slider:before{transform:translateX(16px)}
+</style>
+</head>
+<body>
+
+<!-- 사이드바 -->
+<nav class="sidebar">
+  <div class="logo">
+    <div class="logo-title">AMPIS</div>
+    <div class="logo-sub">자산운용 분석 플랫폼</div>
+  </div>
+  <div class="nav-section">분석</div>
+  <a href="/"          class="nav-item {% if request.path=='/' %}active{% endif %}"><i class="fa-solid fa-gauge"></i> 대시보드</a>
+  <a href="/projects"  class="nav-item {% if '/projects' in request.path %}active{% endif %}"><i class="fa-solid fa-building-columns"></i> 프로젝트</a>
+  <a href="/companies" class="nav-item {% if '/companies' in request.path %}active{% endif %}"><i class="fa-solid fa-chart-bar"></i> 회사 분석</a>
+  <div class="nav-section">수집</div>
+  <a href="/news"      class="nav-item {% if '/news' in request.path %}active{% endif %}"><i class="fa-solid fa-newspaper"></i> 뉴스 수집</a>
+  <a href="/alerts"    class="nav-item {% if '/alerts' in request.path %}active{% endif %}"><i class="fa-solid fa-bell"></i> 알림</a>
+  <div class="nav-section">도구</div>
+  <a href="/ai"        class="nav-item {% if '/ai' in request.path %}active{% endif %}"><i class="fa-solid fa-robot"></i> AI 분석</a>
+  <a href="/settings"  class="nav-item {% if '/settings' in request.path %}active{% endif %}"><i class="fa-solid fa-gear"></i> 설정</a>
+  <div class="sidebar-footer">투자심사역 · AMPIS v2</div>
+</nav>
+
+<!-- 메인 -->
+<div class="main">
+  <div class="topbar">
+    <input type="text" id="gSearch" placeholder="프로젝트명, 회사, 키워드 검색..." onkeydown="if(event.key==='Enter')goSearch(this.value)">
+    <button class="btn" onclick="triggerCrawl(this)"><i class="fa-solid fa-rotate"></i> 수집</button>
+    <button class="btn primary" onclick="location.href='/ai'"><i class="fa-solid fa-robot"></i> AI 분석</button>
+  </div>
+  <div class="content">
+    {% block content %}{% endblock %}
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function showToast(msg, ms=2500){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), ms);
+}
+function goSearch(q){if(q) location.href='/projects?q='+encodeURIComponent(q);}
+
+async function triggerCrawl(btn){
+  btn.disabled=true;
+  btn.innerHTML='<span class="spinner"></span> 수집 중...';
+  try{
+    const r=await fetch('/api/crawl',{method:'POST'});
+    const d=await r.json();
+    if(d.ok) showToast(`수집 완료: ${d.saved}건 신규 저장`);
+    else showToast('수집 실패: '+d.message,'error');
+  }catch(e){showToast('네트워크 오류');}
+  btn.disabled=false;
+  btn.innerHTML='<i class="fa-solid fa-rotate"></i> 수집';
+}
+
+// 유형별 뱃지
+const TYPE_BADGE={부동산:'b-re',인프라:'b-in',에너지:'b-en',기업금융:'b-cf',PEF:'b-pe','M&A':'b-ma',NPL:'b-np'};
+function typeBadge(t){return`<span class="badge ${TYPE_BADGE[t]||'b-etc'}">${t||'기타'}</span>`;}
+function statusDot(s){const c=s==='진행'?'d-act':s==='완료'?'d-cls':'d-rev';return`<span class="sdot ${c}"></span>${s||'검토'}`;}
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

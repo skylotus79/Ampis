@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}대시보드{% endblock %}
+{% block content %}
+<div class="metrics" id="metrics">
+  <div class="metric"><div class="metric-lbl">수집된 프로젝트</div><div class="metric-val" id="m-proj">—</div><div class="metric-sub">DB 누적</div></div>
+  <div class="metric"><div class="metric-lbl">수집된 뉴스</div><div class="metric-val" id="m-news">—</div><div class="metric-sub">전체</div></div>
+  <div class="metric"><div class="metric-lbl">AI 분석 대기</div><div class="metric-val" id="m-unparsed">—</div><div class="metric-sub">미처리 뉴스</div></div>
+  <div class="metric"><div class="metric-lbl">오늘 수집</div><div class="metric-val" id="m-today">—</div><div class="metric-sub">신규 뉴스</div></div>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <div class="card-title">최근 프로젝트 <a href="/projects" style="font-size:11px;color:var(--blue);text-decoration:none">전체보기 →</a></div>
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead><tr><th>프로젝트명</th><th>유형</th><th>규모</th><th>상태</th><th>연/월</th></tr></thead>
+        <tbody id="dash-proj-tbody"><tr><td colspan="5" class="empty">로딩 중...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">유형별 분포</div>
+    <div id="type-legend" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+    <div style="position:relative;height:200px"><canvas id="typeChart"></canvas></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">월별 프로젝트 수집 추이</div>
+  <div style="position:relative;height:160px"><canvas id="trendChart"></canvas></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TYPE_COLOR={부동산:'#378ADD',인프라:'#639922',에너지:'#1D9E75',기업금융:'#EF9F27',PEF:'#7F77DD','M&A':'#D85A30',NPL:'#888780'};
+
+async function loadDashboard(){
+  const st = await fetch('/api/stats').then(r=>r.json());
+  document.getElementById('m-proj').textContent     = st.total_projects.toLocaleString();
+  document.getElementById('m-news').textContent     = st.total_news.toLocaleString();
+  document.getElementById('m-unparsed').textContent = st.unparsed.toLocaleString();
+  document.getElementById('m-today').textContent    = st.today_news.toLocaleString();
+
+  // 유형별 도넛
+  const labels = Object.keys(st.by_type);
+  const vals   = Object.values(st.by_type);
+  const colors = labels.map(l=>TYPE_COLOR[l]||'#aaa');
+  document.getElementById('type-legend').innerHTML = labels.map((l,i)=>
+    `<span style="display:flex;align-items:center;gap:3px;font-size:10px;color:#666">
+      <span style="width:8px;height:8px;border-radius:2px;background:${colors[i]};flex-shrink:0"></span>${l} ${vals[i]}건</span>`
+  ).join('');
+  new Chart(document.getElementById('typeChart'),{
+    type:'doughnut',
+    data:{labels,datasets:[{data:vals,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}
+  });
+
+  // 월별 추이
+  const months = Object.keys(st.by_month).reverse();
+  const mcnt   = months.map(m=>st.by_month[m]);
+  new Chart(document.getElementById('trendChart'),{
+    type:'bar',
+    data:{labels:months,datasets:[{data:mcnt,backgroundColor:'#378ADD',borderRadius:3,label:'건수'}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{font:{size:10}},grid:{display:false}},y:{ticks:{font:{size:10}},grid:{color:'rgba(0,0,0,.05)'}}}}
+  });
+
+  // 최근 프로젝트
+  const projs = await fetch('/api/projects?limit=8').then(r=>r.json());
+  const tbody = document.getElementById('dash-proj-tbody');
+  if(!projs.length){tbody.innerHTML='<tr><td colspan="5" class="empty">프로젝트가 없습니다. 뉴스를 수집하세요.</td></tr>';return;}
+  tbody.innerHTML = projs.map(p=>`
+    <tr onclick="location.href='/projects?highlight=${p.id}'">
+      <td style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name||'—'}</td>
+      <td>${typeBadge(p.type)}</td>
+      <td>${p.size||'—'}</td>
+      <td>${statusDot(p.status)}</td>
+      <td><span class="date-tag">${(p.published||'').slice(0,7)}</span></td>
+    </tr>`).join('');
+}
+loadDashboard();
+</script>
+{% endblock %}
