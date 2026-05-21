@@ -71,7 +71,7 @@ async function sendAI(){
   appendMsg(msg,'user');
   const ld=appendLoading();
   try{
-    const r=await fetch('/api/ai-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+    const r=await fetch('/api/ai-chat',{method:'POST',headers:{'Content-Type':'application/json','X-API-Token':AMPIS_TOKEN},body:JSON.stringify({message:msg})});
     const d=await r.json();
     ld.remove();
     appendMsg(d.ok ? d.text : ('오류: '+(d.error||'알 수 없는 오류')),'ai');
@@ -85,7 +85,7 @@ async function extractNews(){
   const result=document.getElementById('extractResult');
   result.innerHTML='<div style="color:var(--text3);font-size:12px"><span class="spinner"></span> AI 추출 중...</div>';
   try{
-    const r=await fetch('/api/ai-extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const r=await fetch('/api/ai-extract',{method:'POST',headers:{'Content-Type':'application/json','X-API-Token':AMPIS_TOKEN},body:JSON.stringify({text})});
     const d=await r.json();
     if(!d.ok){ result.innerHTML=`<div style="color:var(--red);font-size:12px">오류: ${d.error}</div>`; return; }
     const p=d.data;

@@ -97,11 +97,14 @@ def save_project(news_id: int, data: dict, source_url: str,
     conn.commit()
     conn.close()
 
-def parse_news_with_claude(news: dict, client: anthropic.Anthropic) -> dict | None:
+def parse_news_with_claude(news: dict, client: anthropic.Anthropic,
+                           max_retries: int = 5) -> dict | None:
     """
     단일 뉴스를 Claude로 파싱.
+    Rate Limit(429) 발생 시 지수 백오프로 재시도.
     반환: 파싱된 dict 또는 None (오류 시)
     """
+    import time, random
     user_content = f"""
 제목: {news['title']}
 출처: {news['source']}
@@ -109,26 +112,34 @@ def parse_news_with_claude(news: dict, client: anthropic.Anthropic) -> dict | No
 요약: {news['summary'] or '(요약 없음)'}
 URL: {news['url']}
 """
-    try:
-        msg = client.messages.create(
-            model=MODEL,
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_content}],
-        )
-        raw = msg.content[0].text.strip()
+    base_delay = 2.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            msg = client.messages.create(
+                model=MODEL,
+                max_tokens=1024,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_content}],
+            )
+            raw = msg.content[0].text.strip()
+            raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+            return json.loads(raw)
 
-        # JSON 코드블록 있을 경우 제거
-        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
-
-        return json.loads(raw)
-
-    except json.JSONDecodeError as e:
-        print(f"  [!] JSON 파싱 오류 (news_id={news['id']}): {e}")
-        return None
-    except anthropic.APIError as e:
-        print(f"  [!] Claude API 오류: {e}")
-        return None
+        except json.JSONDecodeError as e:
+            print(f"  [!] JSON 파싱 오류 (news_id={news['id']}): {e}")
+            return None
+        except anthropic.APIStatusError as e:
+            if e.status_code == 429:
+                wait = (base_delay ** attempt) + random.uniform(0.5, 2.0)
+                print(f"  [⏳] Rate Limit → {attempt}회차 {wait:.1f}초 대기 후 재시도...")
+                time.sleep(wait)
+                continue
+            print(f"  [!] Claude API 오류 (status={e.status_code}): {e}")
+            return None
+        except anthropic.APIError as e:
+            print(f"  [!] Claude API 오류: {e}")
+            return None
+    return None
 
 def run_parser(batch_size: int = 20, delay: float = 0.5) -> dict:
     """

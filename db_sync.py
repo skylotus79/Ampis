@@ -5,8 +5,12 @@ AMPIS S3 데이터베이스 동기화 모듈
 """
 
 import os
-import boto3
-from botocore.exceptions import ClientError
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    _BOTO3_AVAILABLE = False
 
 # 배포 환경 분리에 따른 SQLite 경로 일치화
 if os.environ.get("RENDER"):
@@ -19,6 +23,8 @@ S3_KEY = "ampis.db"
 
 def get_s3_client():
     """AWS 자격 증명 정보를 검증하여 boto3 S3 클라이언트를 반환합니다."""
+    if not _BOTO3_AVAILABLE:
+        return None
     aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
     aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
     region = os.environ.get("AWS_DEFAULT_REGION", "ap-northeast-2")

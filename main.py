@@ -26,6 +26,24 @@ import ai_parser
 
 app = Flask(__name__)
 
+# ── API 토큰 인증 (선택적: AMPIS_API_TOKEN 환경변수 설정 시 활성화) ──
+AMPIS_API_TOKEN = os.environ.get("AMPIS_API_TOKEN", "")
+
+def check_token():
+    """AMPIS_API_TOKEN이 설정된 경우에만 인증 강제"""
+    if not AMPIS_API_TOKEN:
+        return None   # 토큰 미설정 시 인증 생략
+    token = request.headers.get("X-API-Token", "")
+    if token != AMPIS_API_TOKEN:
+        return jsonify({"ok": False, "error": "인증 토큰이 올바르지 않습니다."}), 401
+    return None
+
+@app.context_processor
+def inject_api_token():
+    """모든 Jinja2 템플릿에 api_token 자동 주입"""
+    return {"api_token": AMPIS_API_TOKEN}
+
+
 # ── Render 배포 환경 검출 및 경로 세팅 ──
 if os.environ.get("RENDER"):
     DB_PATH = "/tmp/ampis.db"
@@ -287,10 +305,17 @@ def api_crawl():
 
 @app.route("/api/parse", methods=["POST"])
 def api_parse():
-    body  = request.get_json(silent=True) or {}
-    batch = int(body.get("batch_size", 15))
+    body    = request.get_json(silent=True) or {}
+    batch   = int(body.get("batch_size", 15))
+    news_id = body.get("news_id")   # 특정 기사 1건만 파싱 시
     try:
         db_sync.restore_db()
+        # 특정 news_id가 지정된 경우 해당 기사를 미파싱 상태로 강제 설정 후 파싱
+        if news_id:
+            conn = get_db()
+            conn.execute("UPDATE raw_news SET is_parsed=0 WHERE id=?", (news_id,))
+            conn.commit(); conn.close()
+            batch = 1
         parse_result = ai_parser.run_parser(batch_size=batch)
         if parse_result["projects_saved"] > 0:
             db_sync.backup_db()
@@ -300,6 +325,8 @@ def api_parse():
 
 @app.route("/api/ai-chat", methods=["POST"])
 def api_ai_chat():
+    err = check_token()
+    if err: return err
     import anthropic as _ant
     body = request.get_json(silent=True) or {}
     msg  = (body.get("message") or "").strip()
@@ -320,6 +347,8 @@ def api_ai_chat():
 
 @app.route("/api/ai-extract", methods=["POST"])
 def api_ai_extract():
+    err = check_token()
+    if err: return err
     import anthropic as _ant
     body = request.get_json(silent=True) or {}
     text = (body.get("text") or "").strip()

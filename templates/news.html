@@ -76,7 +76,9 @@ function guessType(title){
 
 async function analyzeOne(newsId){
   showToast('AI 분석 요청 중...');
-  const r = await fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch_size:1})});
+  // news_id를 명시적으로 전달하여 해당 기사만 분석
+  const r = await fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({batch_size:1, news_id: newsId})});
   const d = await r.json();
   showToast(d.ok ? `분석 완료: ${d.projects_saved}건 저장` : '분석 실패: '+d.error);
   loadNews();

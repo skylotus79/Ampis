@@ -51,12 +51,11 @@
 let curType='', curReSub='', curQ='';
 
 // URL 파라미터 처리 (검색·하이라이트)
+// ✅ FIX: let 선언을 사용 시점보다 먼저 위치시켜 TDZ 에러 해소
 const urlP = new URLSearchParams(location.search);
-if(urlP.get('q'))        curQ = urlP.get('q');
-if(urlP.get('fi'))       curQ = urlP.get('fi');
-if(urlP.get('highlight')) highlightId = parseInt(urlP.get('highlight'));
-
-let highlightId = parseInt(urlP.get('highlight')||0);
+let highlightId = parseInt(urlP.get('highlight') || 0);
+if(urlP.get('q'))  curQ = urlP.get('q');
+if(urlP.get('fi')) curQ = urlP.get('fi');
 
 function setType(t, btn){
   curType=t; curReSub='';
