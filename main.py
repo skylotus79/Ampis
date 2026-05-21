@@ -1,5 +1,5 @@
 """
-AMPIS Flask 메인 앱 — Render 환경 버그 수정본
+AMPIS Flask 메인 앱 — 전체 기능 완성본 (Render 배포용 경로 버그 및 백틱 충돌 완벽 해결)
 """
 import json, os, re, sqlite3, threading
 from datetime import datetime, timedelta
@@ -8,24 +8,21 @@ from flask import Flask, jsonify, render_template, request
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from crawler import run_crawler
+import crawler
+import ai_parser
 
 app = Flask(__name__)
 
-# ==========================================
-# 🛠️ [Render 환경 대응 경로 수정]
-# ==========================================
+# ── Render 환경 대응 경로 우회 설정 ──────────────────
 if os.environ.get("RENDER"):
     DB_PATH = "/tmp/ampis.db"
     SETTINGS = "/tmp/settings.json"
-    # crawler 모듈 내부의 DB_PATH도 동일하게 덮어써야 크롤러와 메인 앱이 같은 DB를 바라봅니다.
-    import crawler
-    import ai_parser
+    # 수집 모듈과 파서 모듈도 동일한 임시 DB 디렉터리를 가리키도록 일치시킵니다.
     crawler.DB_PATH = "/tmp/ampis.db"
     ai_parser.DB_PATH = "/tmp/ampis.db"
 else:
     DB_PATH = "ampis.db"
     SETTINGS = "settings.json"
-# ==========================================
 
 # ── 설정 ──────────────────────────────────────────────
 DEFAULT_SETTINGS = {
@@ -108,7 +105,6 @@ def restart_scheduler():
     except Exception: pass
     scheduler.add_job(scheduled_job, "interval", hours=hours, id="auto_crawl")
 
-# 초기화 함수들 순차적 보장 실행
 init_db()
 restart_scheduler()
 if not scheduler.running:
@@ -178,7 +174,7 @@ def api_companies():
 
     def add(raw, project, role):
         if not raw: return
-        for co in re.split(r"[,/·\s]+(?=\S{2,})", raw):
+        for co in re.split(r"[,/·\s]+(?=\S{2,})", raw):  # 회사명 분리
             co = co.strip()
             if not co or len(co) < 2: continue
             if co not in cmap:
@@ -285,21 +281,25 @@ def api_ai_extract():
         client = _ant.Anthropic()
         res    = client.messages.create(model="claude-sonnet-4-20250514", max_tokens=1000,
                                         system=system, messages=[{"role":"user","content":text}])
-        raw  = re.sub(r"
-http://googleusercontent.com/immersive_entry_chip/0
+        # 문자 클래스와 수량자를 조합하여 마크다운 파서 충돌 우려가 없는 완벽한 정규식입니다.
+        raw  = re.sub(r"[\`]{3}(?:json)?|[\`]{3}", "", res.content[0].text).strip()
+        return jsonify({"ok": True, "data": json.loads(raw)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
----
+# ── API: 설정 ─────────────────────────────────────────
+@app.route("/api/settings", methods=["GET"])
+def api_settings_get():
+    return jsonify(load_settings())
 
-## 💡 최종 배포 전 중요 체크리스트
+@app.route("/api/settings", methods=["POST"])
+def api_settings_post():
+    body = request.get_json(silent=True) or {}
+    cur  = load_settings()
+    cur.update(body)
+    save_settings(cur)
+    restart_scheduler()
+    return jsonify({"ok": True, "settings": cur})
 
-1. **Gunicorn 실행 진입점 변경:** * 최상단 코드를 보시면 Flask 인스턴스 명이 `app = Flask(__name__)` 이고 파일명이 `main.py` 입니다.
-   * 따라서 Render 대시보드의 **Start Command** 값을 반드시 **`gunicorn main:app --bind 0.0.0.0:10000`** 혹은 웹 포트 환경 변수에 맞춰 세팅해 주세요.
-2. **Anthropic API Key 바인딩:**
-   * 코드 내부에서 Claude 모델(`claude-sonnet-4-20250514`)을 사용해 AI 파싱을 진행하고 있습니다.
-   * Render 대시보드 -> **Environment Variables(환경 변수)** 탭으로 이동하신 후, **`ANTHROPIC_API_KEY`** 라는 이름으로 발급받으신 클로드 API 키를 반드시 주입해야 AI 통신 시 500 에러가 재발하지 않습니다.
-
-<ElicitationsGroup message="배포 후 운영 및 기능 최적화를 위해 고려할 수 있는 조치사항입니다.">
-  <Elicitation label="서버가 재부팅될 때 임시 디렉터리(/tmp)의 SQLite 데이터 유실 방지 대체방안 알아보기" query="Render의 웹 서비스는 디스크가 영구적이지 않아서 /tmp/ampis.db를 쓰면 배포되거나 재시작할 때 수집 데이터가 날아가게 되는데, Supabase나 Render PostgreSQL 같은 외부 완전관리형 DB로 코드를 마이그레이션하는 방법을 상세히 알려줘."/>
-  <Elicitation label="Gunicorn이 타임아웃으로 웹 서버를 강제 종료하는 현상 예방 설정법" query="AI 파서 기능 처리나 대형 크롤링 API를 수동 호출할 때 Gunicorn의 기본 타임아웃(30초) 제한에 걸려 웹 요청이 중단될 수 있어. 타임아웃 제한을 넉넉히 늘리거나 비동기 백그라운드 큐로 처리하는 효율적인 아키텍처 구성을 설명해줘."/>
-  <Elicitation label="Claude 최신 버전에 의존하는 코드 호환성 및 에러 핸들링 보완 방법" query="ai_parser.py 내부에 지정된 모델명 'claude-sonnet-4-20250514' 호출에 실패하거나 API 할당량 초과(Rate Limit) 등 오류가 날 때, 서비스 중단 없이 예외 처리(Try-Catch 및 재시도 로직)를 강화하는 가이드를 제시해줘."/>
-</ElicitationsGroup>
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
