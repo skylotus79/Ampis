@@ -1,25 +1,38 @@
 """
-AMPIS Flask 메인 앱 — 전체 기능 완성본 (Render 배포용 경로 버그 및 백틱 충돌 완벽 해결)
+AMPIS Flask 메인 앱 — 전체 기능 통합 완성본
+- Render 환경의 파일 리셋 방지를 위한 S3 오토 백업/복원 연동
+- 과부하 락 해소를 위한 SQLite 동시성 제어 몽키 패치 탑재
+- 날짜 필터링 및 Claude API 백오프 파싱 완벽 연동
 """
-import json, os, re, sqlite3, threading
+import json, os, re, sqlite3, threading, traceback
 from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, render_template, request
 from apscheduler.schedulers.background import BackgroundScheduler
 
+# ── SQLite 멀티 프로세스 락 방지용 전역 몽키 패치 (Gunicorn 다중 워커 대응) ──
+_original_connect = sqlite3.connect
+def robust_connect(*args, **kwargs):
+    if "timeout" not in kwargs:
+        kwargs["timeout"] = 30.0
+    return _original_connect(*args, **kwargs)
+sqlite3.connect = robust_connect
+
+# ── 모듈 로드 ──
+import db_sync
 from crawler import run_crawler
 import crawler
 import ai_parser
 
 app = Flask(__name__)
 
-# ── Render 환경 대응 경로 우회 설정 ──────────────────
+# ── Render 배포 환경 검출 및 경로 세팅 ──
 if os.environ.get("RENDER"):
     DB_PATH = "/tmp/ampis.db"
     SETTINGS = "/tmp/settings.json"
-    # 수집 모듈과 파서 모듈도 동일한 임시 DB 디렉터리를 가리키도록 일치시킵니다.
     crawler.DB_PATH = "/tmp/ampis.db"
     ai_parser.DB_PATH = "/tmp/ampis.db"
+    db_sync.DB_PATH = "/tmp/ampis.db"
 else:
     DB_PATH = "ampis.db"
     SETTINGS = "settings.json"
@@ -48,8 +61,11 @@ def load_settings():
     return DEFAULT_SETTINGS.copy()
 
 def save_settings(data):
-    with open(SETTINGS, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(SETTINGS, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[설정 저장 실패] {e}")
 
 # ── DB ────────────────────────────────────────────────
 def get_db():
@@ -85,17 +101,25 @@ def init_db():
     """)
     conn.commit(); conn.close()
 
-# ── 스케줄러 ──────────────────────────────────────────
+# ── 백그라운드 스케줄러 ───────────────────────────────
 scheduler  = BackgroundScheduler()
 crawl_lock = threading.Lock()
 
 def scheduled_job():
     if not crawl_lock.acquire(blocking=False): return
     try:
-        result = run_crawler()
-        if result["saved"] > 0 and load_settings().get("auto_parse"):
-            from ai_parser import run_parser
-            run_parser(batch_size=result["saved"])
+        db_sync.restore_db()
+        settings = load_settings()
+        crawl_from = settings.get("crawl_from")
+        crawl_to = settings.get("crawl_to")
+        
+        result = run_crawler(crawl_from, crawl_to)
+        
+        if result["saved"] > 0:
+            db_sync.backup_db()
+            if settings.get("auto_parse"):
+                ai_parser.run_parser(batch_size=min(result["saved"], 15))
+                db_sync.backup_db()
     finally:
         crawl_lock.release()
 
@@ -105,10 +129,25 @@ def restart_scheduler():
     except Exception: pass
     scheduler.add_job(scheduled_job, "interval", hours=hours, id="auto_crawl")
 
+db_sync.restore_db()
 init_db()
 restart_scheduler()
 if not scheduler.running:
     scheduler.start()
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    print("=" * 60)
+    print("🚨 [AMPIS APP RUNTIME ERROR DECTECTED]")
+    traceback.print_exc()
+    print("=" * 60)
+    
+    return jsonify({
+        "ok": False,
+        "error_type": type(e).__name__,
+        "message": str(e),
+        "traceback": traceback.format_exc().split("\n")
+    }), 500
 
 # ── 페이지 라우트 ─────────────────────────────────────
 @app.route("/")
@@ -174,7 +213,7 @@ def api_companies():
 
     def add(raw, project, role):
         if not raw: return
-        for co in re.split(r"[,/·\s]+(?=\S{2,})", raw):  # 회사명 분리
+        for co in re.split(r"[,/·\s]+(?=\S{2,})", raw):
             co = co.strip()
             if not co or len(co) < 2: continue
             if co not in cmap:
@@ -233,17 +272,29 @@ def api_crawl():
     if not crawl_lock.acquire(blocking=False):
         return jsonify({"ok": False, "message": "이미 크롤링 중"}), 409
     try:
-        return jsonify({"ok": True, **run_crawler()})
+        db_sync.restore_db()
+        settings = load_settings()
+        crawl_from = settings.get("crawl_from")
+        crawl_to = settings.get("crawl_to")
+        
+        result = run_crawler(crawl_from, crawl_to)
+        if result["saved"] > 0:
+            db_sync.backup_db()
+            
+        return jsonify({"ok": True, **result})
     finally:
         crawl_lock.release()
 
 @app.route("/api/parse", methods=["POST"])
 def api_parse():
     body  = request.get_json(silent=True) or {}
-    batch = int(body.get("batch_size", 20))
+    batch = int(body.get("batch_size", 15))
     try:
-        from ai_parser import run_parser
-        return jsonify({"ok": True, **run_parser(batch_size=batch)})
+        db_sync.restore_db()
+        parse_result = ai_parser.run_parser(batch_size=batch)
+        if parse_result["projects_saved"] > 0:
+            db_sync.backup_db()
+        return jsonify({"ok": True, **parse_result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -281,13 +332,11 @@ def api_ai_extract():
         client = _ant.Anthropic()
         res    = client.messages.create(model="claude-sonnet-4-20250514", max_tokens=1000,
                                         system=system, messages=[{"role":"user","content":text}])
-        # 문자 클래스와 수량자를 조합하여 마크다운 파서 충돌 우려가 없는 완벽한 정규식입니다.
         raw  = re.sub(r"[\`]{3}(?:json)?|[\`]{3}", "", res.content[0].text).strip()
         return jsonify({"ok": True, "data": json.loads(raw)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# ── API: 설정 ─────────────────────────────────────────
 @app.route("/api/settings", methods=["GET"])
 def api_settings_get():
     return jsonify(load_settings())

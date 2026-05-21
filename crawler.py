@@ -171,7 +171,7 @@ def collect_source(src):
             articles.extend(fetch_html_fallback(cfg, src["name"]))
     return articles
 
-def run_crawler():
+def run_crawler(crawl_from: str | None = None, crawl_to: str | None = None):
     init_db()
     all_articles, by_source = [], {}
     for src in SOURCES:
@@ -179,12 +179,17 @@ def run_crawler():
         by_source[src["name"]] = len(items)
         all_articles.extend(items)
     fetched = len(all_articles)
-    filtered = [a for a in all_articles if is_finance_related(a["title"], a["summary"])]
+    
+    date_filtered_articles = []
+    for a in all_articles:
+        pub_date = a["published"][:10]
+        if crawl_from and crawl_from.strip() and pub_date < crawl_from.strip():
+            continue
+        if crawl_to and crawl_to.strip() and pub_date > crawl_to.strip():
+            continue
+        date_filtered_articles.append(a)
+
+    filtered = [a for a in date_filtered_articles if is_finance_related(a["title"], a["summary"])]
     deduped = deduplicate(filtered)
     saved = save_to_db(deduped)
     return {"fetched": fetched, "filtered": len(filtered), "deduped": len(deduped), "saved": saved, "by_source": by_source}
-
-if __name__ == "__main__":
-    result = run_crawler()
-    print(f"수집:{result['fetched']} 필터:{result['filtered']} 중복제거:{result['deduped']} 저장:{result['saved']}")
-    for s,c in result["by_source"].items(): print(f"  {s}: {c}건")
